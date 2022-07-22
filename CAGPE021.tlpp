@@ -1,0 +1,123 @@
+/*/{Protheus.doc} CAGPE021
+//Rotina para cadastro das solicitações de refeição
+@author José Caio
+@since 22/06/2022
+@version Git
+
+@type function
+/*/
+
+#include "topconn.ch"
+
+#define CRLF chr(13)+chr(10)
+
+user function CAGPE021
+
+	local aRotAdic	:= {} as array
+	local bPre		:= {|| } as codeblock 						//Chamada antes da função (sem retorno)
+	local bOK		:= {|| valOk()} as codeblock				//Chamada ao clicar em OK (retorno lógico)
+	local bTTS		:= {|| } as codeblock						//Chamada durante transacao (sem retorno)
+	local bNoTTS	:= {|| } as codeblock						//Chamada após transacao (sem retorno)
+	local aButtons	:= {} as array								//Adiciona botões na tela de inclusão, alteração, visualização e exclusao
+	private ctabCad	:= "Z2B" as character						//Informa qual a tabela					
+	private ctitulo	:= "Solicitações de Refeição" as character	//Titulo da rotina
+	private cvalExc	:= ".t." as character						//Informa se pode excluir
+	private cvalAlt	:= ".t." as character						//Informa se pode alterar
+	
+	axCadastro(ctabCad,ctitulo,cvalExc,cvalAlt, aRotAdic, bPre, bOK, bTTS, bNoTTS, , , aButtons, , ) 
+
+return
+
+static function valOk()
+	local lret := .t. as logical
+
+	if INCLUI .or. ALTERA
+		lret := valInc()
+	endif
+
+return lret
+
+Static Function valInc()
+	local lret			:= .t. as logical
+	local cquery		:= "" as character
+	local caliasTemp	:= "" as character
+	local cClasse 		:= "" as character
+
+	//Validar se não há um conflito de datas para o mesmo centro de custo
+
+	cquery := " SELECT " + CRLF
+	cquery += " 	Z2B_DATADE," + CRLF
+	cquery += "		Z2B_DATAAT," + CRLF
+	cquery += "		Z2B.R_E_C_N_O_ AS RECNO " + CRLF
+	cquery += " FROM " + CRLF
+	cquery += "		Z2B010 Z2B" + CRLF
+	cquery += " JOIN CTT010 CTT ON " + CRLF
+	cquery += "		(Z2B_CTT = CTT_CUSTO AND CTT.D_E_L_E_T_ = ' ')" + CRLF
+	cquery += "	WHERE ( " + CRLF
+	cquery += "		('" +dToS(m->z2b_datade)+"' BETWEEN Z2B_DATADE AND Z2B_DATAAT) OR" + CRLF
+	cquery += "		('" +dToS(m->z2b_dataat)+"' >= Z2B_DATADE AND '"+dToS(m->z2b_dataat)+"' < Z2B_DATAAT) OR" + CRLF
+	cquery += "		('" +dToS(m->z2b_datade)+"' <= Z2B_DATAAT AND '"+dToS(m->z2b_dataat)+"' > Z2B_DATAAT ))" + CRLF
+	cquery += " AND " + CRLF
+	cquery += "		Z2B.D_E_L_E_T_ = ' ' "  + CRLF
+	cquery += " AND " + CRLF
+	cquery += " 	Z2B_CTT = '"+ m->z2b_ctt +"' "+  CRLF
+
+
+	tcquery cquery new alias (caliasTemp):=getNextAlias()
+
+	(caliasTemp)->(dbGoTop())
+	//Existe outra solicitação para o periodo informado.
+	if !(caliasTemp)->(eof()) .and. AllTrim(Str((caliasTemp)->RECNO)) != getRecno(m->z2b_ctt, DToS(m->z2b_datade), DToS(m->z2b_dataat))
+		lret	:= .f.
+		msgStop("Existe outra soicitação de refeição para o mesmo período e centro de custo. Verifique!")
+	endif
+	(caliasTemp)->(dbCloseArea())
+
+	//data inicial não pode ser maior que a final
+	if (m->z2b_datade > m->z2b_dataat)
+		lret := .f.
+		MsgStop("Data inicial maior do que a data final, você não pode voltar no tempo ")
+	endif
+
+	cClasse := posicione("CTT",1,xFilial("CTT") + m->z2b_ctt, 'CTT_CLASSE')
+
+	//O centro de custo não pode ser vazio ou sintetico
+	if (Empty(cClasse) .OR. cClasse != '2')
+		lret := .f.
+		MsgStop("Centro de custo não encontrado ou diferente de analitico, selecione um centro de custo válido")
+	endif
+
+	//Impedir a entrada de numeros negativos
+	if (m->z2b_qtd < 0)
+		lret := .f.
+		MsgStop("Você digitou um valor negativo, isso não e permitido !")
+	endif
+
+
+return lret
+
+
+Static Function getRecno(cCtt as character, cDataDe as character, cDataAt as character)
+	local cRet := '' as character
+
+	if Select('RECNO_TMP') > 0
+		RECNO_TMP->(DbCloseArea())
+	endif
+
+	BeginSql Alias 'RECNO_TMP'
+		SELECT TOP 1
+			R_E_C_N_O_ AS RECNO
+		FROM
+			Z2B010
+		WHERE
+			D_E_L_E_T_ = ' '
+			AND Z2B_CTT = %Exp:cCtt%
+			AND Z2B_DATADE = %Exp:cDataDe%
+			AND Z2B_DATAAT = %Exp:cDataAt%
+	EndSql
+
+	if !RECNO_TMP->(EOF())
+		cRet := AllTrim(Str(RECNO_TMP->RECNO))
+	endif
+
+Return cRet
